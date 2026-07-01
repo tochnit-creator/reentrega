@@ -406,11 +406,17 @@ body.empty .empty-ov{display:flex}
       </div>
       <div class="eo-title">Importe a planilha termômetro</div>
       <div class="eo-sub">Selecione o arquivo <b>termometro.xlsx</b> (abas “gris pos”, “grid reentrega” e “faturamento dia”) para gerar a análise de pós-venda, pedidos em trânsito e prioridade de entrega.</div>
-      <label class="eo-btn" id="eoBtn">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
-        <span>Importar planilha</span>
-        <input type="file" id="eoFile" accept=".xlsx,.xls" style="display:none" onchange="importXLSX(this.files[0])">
-      </label>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
+        <button class="eo-btn" id="eoRefresh" type="button" onclick="refreshFromSheet()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+          <span>Atualizar da planilha</span>
+        </button>
+        <label class="eo-btn" id="eoBtn" style="background:transparent;color:var(--gold);border:1px solid var(--gold-2);box-shadow:none">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
+          <span>Importar manualmente</span>
+          <input type="file" id="eoFile" accept=".xlsx,.xls" style="display:none" onchange="importXLSX(this.files[0])">
+        </label>
+      </div>
       <div class="eo-pulse"><span></span><span></span><span></span></div>
       <div class="eo-err" id="eoErr"></div>
     </div>
@@ -420,9 +426,13 @@ body.empty .empty-ov{display:flex}
     <div class="bar-top">
       <div class="bar-label">Período de análise</div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <label class="imp-btn" id="impLabel">
+        <button class="imp-btn" id="impRefresh" type="button" onclick="refreshFromSheet()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+          <span>Atualizar da planilha</span>
+        </button>
+        <label class="imp-btn" id="impLabel" style="background:transparent">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
-          <span>Importar planilha termômetro</span>
+          <span>Importar manualmente</span>
           <input type="file" id="impFile" accept=".xlsx,.xls" style="display:none" onchange="importXLSX(this.files[0])">
         </label>
         <span class="upd-st" id="updSt"></span>
@@ -943,6 +953,35 @@ const FAT_CSV_URL="https://docs.google.com/spreadsheets/d/e/2PACX-1vR66FBTOWqPYZ
 let FAT_LIVE=null;
 const SAC_CSV_URL="https://docs.google.com/spreadsheets/d/e/2PACX-1vQ98yfADHc5MomtP2JEqmHCkbqGjPdT1ud78EHHw-J11eGjpee6RB3AcH1qslc7yrZ2COBVKXQbcarT/pub?gid=1901982183&single=true&output=csv";
 let SAC_LIVE=null;
+/* ===== PLANILHA TERMÔMETRO (abas "gris pos", "grid reentrega", "faturamento dia") =====
+   Baixa a planilha inteira do Google como .xlsx e usa a MESMA leitura do upload manual.
+   Requisito: a planilha precisa estar compartilhada como "qualquer pessoa com o link pode ver". */
+const TERMO_SHEET_ID="19VL0LsoDyOrI8A8lzXYzVbgPsSD8SmWp2jtY0t8cPLs";
+const TERMO_XLSX_URL="https://docs.google.com/spreadsheets/d/"+TERMO_SHEET_ID+"/export?format=xlsx";
+async function fetchTermoWorkbook(){
+  const st=document.getElementById('updSt');
+  /* tenta direto; se o navegador bloquear por CORS, cai para um proxy público */
+  const proxies=[
+    u=>u,
+    u=>'https://corsproxy.io/?url='+encodeURIComponent(u),
+    u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u)
+  ];
+  let lastErr;
+  for(let i=0;i<proxies.length;i++){
+    try{
+      if(st){ st.className='upd-st'; st.textContent = i?('Buscando via proxy '+i+'…'):'Buscando planilha do Google…'; }
+      const r=await fetch(proxies[i](TERMO_XLSX_URL+'&_t='+Date.now()),{cache:'no-store'});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const buf=await r.arrayBuffer();
+      if(!buf||buf.byteLength<100) throw new Error('resposta vazia');
+      const head=new Uint8Array(buf.slice(0,2));
+      /* .xlsx é um zip: começa com os bytes "PK" (0x50 0x4B). Se vier HTML, a planilha não está pública. */
+      if(head[0]===0x50 && head[1]===0x4B) return buf;
+      throw new Error('a planilha não está pública — compartilhe como "qualquer pessoa com o link pode ver"');
+    }catch(e){ lastErr=e; }
+  }
+  throw lastErr||new Error('não foi possível buscar a planilha');
+}
 function _fnum(v){
   if(typeof v==='number') return v;
   let s=String(v==null?'':v).replace(/[^\d.,\-]/g,''); if(!s) return NaN;
@@ -1033,18 +1072,20 @@ async function refreshFatFromSheet(){
   return FAT_LIVE;
 }
 
-async function importXLSX(file){
-  if(!file) return;
+async function importXLSX(file){ if(!file) return; return runImport(()=>file.arrayBuffer()); }
+async function refreshFromSheet(){ return runImport(fetchTermoWorkbook); }
+async function runImport(getBuf){
   const lab=document.getElementById('impLabel'), st=document.getElementById('updSt');
   const eo=document.getElementById('eoBtn'), eoErr=document.getElementById('eoErr');
-  [lab,eo].forEach(b=>b&&b.classList.add('loading'));
+  const BTNS=[lab,eo,document.getElementById('impRefresh'),document.getElementById('eoRefresh')];
+  BTNS.forEach(b=>b&&b.classList.add('loading'));
   if(st){ st.className='upd-st'; st.textContent='Lendo planilha…'; }
   if(eoErr) eoErr.textContent='';
   try{
     try{ if(st){st.className='upd-st';st.textContent='Atualizando faturamento da planilha…';} await refreshFatFromSheet(); }catch(_e){}
     try{ if(st){st.className='upd-st';st.textContent='Atualizando SAC da planilha…';} await refreshSacFromSheet(); }catch(_e3){}
     if(typeof XLSX==='undefined') throw new Error('biblioteca de leitura não carregou (precisa de internet)');
-    const buf=await file.arrayBuffer();
+    const buf=await getBuf();
     const wb=XLSX.read(buf,{cellDates:true});
     const shPos=wb.Sheets[findSheet(wb,'gris pos')||findSheet(wb,'pos')];
     const shRe=wb.Sheets[findSheet(wb,'grid reentrega')||findSheet(wb,'reentrega')];
@@ -1141,7 +1182,7 @@ async function importXLSX(file){
     if(st){ st.className='upd-st err'; st.textContent='Erro: '+e.message; }
     if(eoErr) eoErr.textContent='Erro: '+e.message;
   }
-  finally{ [lab,eo].forEach(b=>b&&b.classList.remove('loading')); const f=document.getElementById('impFile'); if(f)f.value=''; const f2=document.getElementById('eoFile'); if(f2)f2.value=''; }
+  finally{ BTNS.forEach(b=>b&&b.classList.remove('loading')); const f=document.getElementById('impFile'); if(f)f.value=''; const f2=document.getElementById('eoFile'); if(f2)f2.value=''; }
 }
 function findSheet(wb,name){ const n=name.toLowerCase(); return wb.SheetNames.find(s=>s.toLowerCase()===n)||wb.SheetNames.find(s=>s.toLowerCase().includes(n)); }
 
